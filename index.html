@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Center Star MSA</title>
+        <link rel="stylesheet" href="https://pyscript.net/releases/2022.09.1/pyscript.css" />
+        <script defer src="https://pyscript.net/releases/2022.09.1/pyscript.js"></script>
+        <style>
+            h2, div, html, head, body { margin-top: 0; }
+            table, th, td {
+                border:1px solid black;
+                text-align: center;
+                font-size: large;
+            }
+            .question {
+                color: #000000;
+                font-size: large;
+                font-weight: bold;
+                padding: 10px 0 10px 0;
+            }
+            .division {
+                padding: 0 0 0 15px;
+                width: 100%;
+                font-family: monospace;
+                font-size: large;
+                overflow-wrap: break-word;
+            }
+            .alignment_text {
+                font-family: monospace;
+                font-size: large;
+            }
+            .alignment_text em {
+                letter-spacing: 0.5em;
+                font-weight: bold;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="division">
+            <h2>Center Star Multiple Sequence Alignment Demo</h2>
+            <p>
+                <b>Star Alignment Heuristic:</b>
+                The twist in the star alignment heuristic is that we
+                <br>(1) find the sequence that is the most similar to all the rest using pairwise alignment and
+                <br>(2) use it as the “center of a star” when aligning all other sequences
+                <br>(3) we will only use pairwise alignments with the center sequence when building the multiple sequence alignment
+                <br>(4) remember, once a gap is added, it is never removed
+            </p>
+        </div>
+        <br>
+        <form onsubmit="return false">
+            <div class="division">
+                <div style="width: 40%; float: left;">
+                    <label class="question" for="sequences">Enter comma separated input sequences</label>
+                    <textarea id="sequences" class="py-input" name="sequences_input" rows="5" cols="50">TGGGAGCGA, TGCCAGGGA, TGCCGGA, AGCCGGGAA</textarea>
+                    <br>
+                    <br>
+                    <button id="new-task-btn" type="submit" value="Submit" py-onClick="add_task()">Compute Alignment</button>
+                </div>
+                <div style="margin-left: 40%;">
+                    <label class="question" for="match_score">Match Score</label>
+                    <input type="number" id="match_score" class="py-input" name="match_score" value="0">
+                    <br>
+                    <br>
+                    <label class="question" for="mismatch_score">Mismatch Score</label>
+                    <input type="number" id="mismatch_score" class="py-input" name="mismatch_score" value="1">
+                    <br>
+                    <br>
+                    <label class="question" for="match_score">Gap Score</label>
+                    <input type="number" id="gap_score" class="py-input" name="gap_score" value="1">
+                </div>
+            </div>
+        </form>
+        <br>
+        <div class="division">
+            <div style="width: 30%; float: left; border-right: 1px solid black;">
+                <h3 id="headingOptimalPairwiseAligns"></h3>
+                <p id="outputOptimalPairwiseAligns" class="alignment_text"></p>
+            </div>
+            <div style="margin-left: 2%; width: 30%; float: left; border-right: 1px solid black;">
+                <h3 id="headingMatrix"></h3>
+                <p id="outputMatrix"></p>
+            </div>
+            <div style="margin-left: 64%;">
+                <h3 id="headingFinalAligns"></h3>
+                <p id="outputFinalAligns" class="alignment_text"></p>
+            </div>
+        </div>
+        <py-script>
+            def add_task(*args, **kwargs):
+                seqs = Element("sequences").value
+                seqs = seqs.split(',')
+                seqs = [s.strip() for s in seqs]
+                match = int(Element("match_score").value) * -1
+                mismatch = int(Element("mismatch_score").value) * -1
+                gap = int(Element("gap_score").value) * -1
+                final_alignments = center_star_alignment(seqs, match, mismatch, gap)
+        </py-script>
+
+        <py-script>
+            UP = (-1,0)
+            LEFT = (0, -1)
+            TOPLEFT = (-1, -1)
+            ORIGIN = (0, 0)
+            
+            def traceback(v, w, pointers):
+                i, j = len(v), len(w)
+                new_v = []
+                new_w = []
+                while True:
+                    di, dj = pointers[i][j]
+                    if (di,dj) == LEFT:
+                        new_v.append('-')
+                        new_w.append(w[j-1])
+                    elif (di,dj) == UP:
+                        new_v.append(v[i-1])
+                        new_w.append('-')
+                    elif (di,dj) == TOPLEFT:
+                        new_v.append(v[i-1])
+                        new_w.append(w[j-1])
+                    i, j = i + di, j + dj
+                    if (i <= 0 and j <= 0):
+                        break
+                return [''.join(new_v[::-1]), ''.join(new_w[::-1])]
+            
+            
+            def pairwise_align(v, w, match, mismatch, gap):
+                M = [[0 for j in range(len(w)+1)] for i in range(len(v)+1)]
+                pointers = [[ORIGIN for j in range(len(w)+1)] for i in range(len(v)+1)]
+                score, alignment = None, None
+                
+                def levenshtein(v, w, match, mismatch, gap):
+                    for i in range(len(v)+1):
+                        for j in range(len(w)+1):
+                            if(i == 0 and j == 0):
+                                M[i][j] = 0
+                            elif(i == 0):
+                                M[i][j] = M[i][j-1] + gap
+                                pointers[i][j] = LEFT
+                            elif(j == 0):
+                                M[i][j] = M[i-1][j] + gap
+                                pointers[i][j] = UP
+                            else:
+                                delta = mismatch
+                                if(v[i-1] == w[j-1]):
+                                    delta = match
+                                path = max([(LEFT, M[i][j-1] + gap)
+                                , (UP, M[i-1][j] + gap)
+                                , (TOPLEFT, M[i-1][j-1] + delta)]
+                                , key = lambda x: x[1])
+            
+                                pointers[i][j] = path[0]
+                                M[i][j] = path[1]
+                    return M, pointers
+            
+                M, pointers = levenshtein(v, w, match, mismatch, gap)
+                score = M[len(v)][len(w)]
+            
+                alignment = traceback(v, w, pointers)
+                return score, alignment
+            
+            
+            def center_star_alignment(seqs, match, mismatch, gap):
+                n = len(seqs)
+                pairwise_dist_mat = []
+            
+                for i in range(n):
+                    pairwise_dist_mat.append([])
+                    for j in range(n):
+                        pairwise_dist_mat[i].append([0, '', ''])
+            
+                Element("headingOptimalPairwiseAligns").write("The Optimal Pairwise Alignments are")
+                html_text_aligns = ''
+
+                for i in range(n):
+                    for j in range(i+1, n):
+                        score, alignment = pairwise_align(seqs[i], seqs[j], match, mismatch, gap)
+                        score = abs(score)
+                        
+                        pairwise_dist_mat[i][j] = [score] + alignment
+                        pairwise_dist_mat[j][i] = [score] + alignment[::-1]
+            
+                        html_text_aligns += 'S' + str(i+1) + ': <em>' + alignment[0] + '</em>'
+                        html_text_aligns += '<br>S' + str(j+1) + ': <em>' + alignment[1] + '</em>'
+                        html_text_aligns += '<br>d(S' + str(i+1) + ', S' + str(j+1) +') = ' + str(score) + '<br><br>'
+                
+                Element("outputOptimalPairwiseAligns").write(html_text_aligns)
+            
+                center_star_index = -1
+                min_pairwise_dist_sum = 2**31
+            
+                for i in range(n):
+                    current_dist_sum = 0
+                    for j in range(n):
+                        current_dist_sum += pairwise_dist_mat[i][j][0]
+                    if(current_dist_sum < min_pairwise_dist_sum):
+                        min_pairwise_dist_sum = current_dist_sum
+                        center_star_index = i
+                
+                Element("headingMatrix").write("Pairwise Distance Matrix")
+                html_matrix = '{{table style="width:25%"}}'
+                total = 0
+
+                for r in range(n+1):
+                    if(r != 0):
+                        html_matrix += '{{tr}}{{th}}S' + str(r) + '{{/th}}'
+                    else:
+                        html_matrix += '{{tr}}{{th}}{{/th}}'
+                    for c in range(n+2):
+                        if(c == n+1 and r != 0):
+                            html_matrix += '{{td}} = ' + str(total) + '{{/td}}'
+                            total = 0
+                        elif(c == n+1 and r == 0):
+                            html_matrix += '{{th}}Total{{/th}}'
+                        elif(c != 0 and r == 0):
+                            html_matrix += '{{th}}S' + str(c) + '{{/th}}'
+                        elif(c > 0 and r > 0):
+                            html_matrix += '{{td}}' + str(pairwise_dist_mat[r-1][c-1][0]) + '{{/td}}'
+                            total += pairwise_dist_mat[r-1][c-1][0]
+                        
+                    html_matrix += '{{/tr}}'
+                html_matrix += '{{/table}}{{br}}'
+
+                html_matrix += '{{h3}}Center Sequence (SC){{br}}SC: S' + str(center_star_index+1) + ' = ' + seqs[center_star_index] + '{{/h3}}'
+
+                html_matrix = html_matrix.replace('{{', '<').replace('}}', '>')
+
+                Element("outputMatrix").write(html_matrix)
+                
+                final_alignments = []
+                Element("headingFinalAligns").write("Computing Final Alignment")
+                html_final_alignments = ''
+            
+                for j in range(n):
+                    if(j != center_star_index):
+                        if(final_alignments == []):
+                            final_alignments.append(pairwise_dist_mat[center_star_index][j][1])
+                            final_alignments.append(pairwise_dist_mat[center_star_index][j][2])
+                        else:
+                            current_seq = pairwise_dist_mat[center_star_index][j][1]
+                            merging_seq = pairwise_dist_mat[center_star_index][j][2]
+            
+                            while(final_alignments[0] != current_seq):
+                                i = 0
+                                while(i != len(current_seq)):
+                                    if(current_seq[i] == '-' and i >= len(final_alignments[0])):
+                                        final_alignments[0] = final_alignments[0] + '-'
+                                        for k in range(1,len(final_alignments)):
+                                            final_alignments[k] = final_alignments[k] + '-'
+                                    elif(current_seq[i] == '-' and final_alignments[0][i] != '-'):
+                                        final_alignments[0] = final_alignments[0][:i] + '-' + final_alignments[0][i:]
+                                        for k in range(1,len(final_alignments)):
+                                            final_alignments[k] = final_alignments[k][:i] + '-' + final_alignments[k][i:]
+                                    elif(current_seq[i] != '-' and final_alignments[0][i] == '-'):
+                                        current_seq = current_seq[0:i] + '-' + current_seq[i:]
+                                        merging_seq = merging_seq[0:i] + '-' + merging_seq[i:]
+                                    i += 1
+                                
+                                i = 0
+                                while(i != len(final_alignments[0])):
+                                    if(final_alignments[0][i] == '-' and i >= len(current_seq)):
+                                        current_seq = current_seq + '-'
+                                    elif(current_seq[i] == '-' and final_alignments[0][i] != '-'):
+                                        final_alignments[0] = final_alignments[0][:i] + '-' + final_alignments[0][i:]
+                                        for k in range(1,len(final_alignments)):
+                                            final_alignments[k] = final_alignments[k][:i] + '-' + final_alignments[k][i:]
+                                    elif(current_seq[i] != '-' and final_alignments[0][i] == '-'):
+                                        current_seq = current_seq[0:i] + '-' + current_seq[i:]
+                                        merging_seq = merging_seq[0:i] + '-' + merging_seq[i:]
+                                    i += 1
+                            final_alignments.append(merging_seq)
+                        
+                        html_final_alignments += 'Merging SC [' + pairwise_dist_mat[center_star_index][j][1] + '] and ' + 'S' + str(j+1) + ' [' + pairwise_dist_mat[center_star_index][j][2] + ']:{{br}}{{em}}'
+                        for a in final_alignments:
+                            html_final_alignments += a + '{{br}}'
+                        html_final_alignments += '{{/em}}{{br}}{{br}}'
+
+                html_final_alignments += '{{b style="color: red; font-size: larger"}}The final center star alignment is:{{/b}}{{br}}{{em}}'
+                for a in final_alignments:
+                    html_final_alignments += a + '{{br}}'
+                html_final_alignments += '{{/em}}{{br}}{{br}}'
+                
+                html_final_alignments = html_final_alignments.replace('{{', '<').replace('}}', '>')
+                Element("outputFinalAligns").write(html_final_alignments)
+
+                return final_alignments
+            
+            # final_alignments = center_star_alignment(seqs, match, mismatch, gap)
+        </py-script>
+    </body>
+</html>
